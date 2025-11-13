@@ -51,5 +51,5 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "Cosmic Leap.sln"
+    "dotnet.defaultSolution": "Kinetic Energy.sln"
 }
