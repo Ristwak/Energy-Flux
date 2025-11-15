@@ -5,6 +5,7 @@ using UnityEngine.UI; // For UI button references
 public class MenuScript : MonoBehaviour
 {
     public GameObject mainMenuPanel; // The main menu panel (e.g., Start, About, Quit buttons)
+    // public GameObject aboutPanel;    // The About panel with game information
     // public GameObject gameUI;       // Game UI (e.g., HUD, timer, etc.)
     // public GameObject pauseMenuPanel; // Pause menu for in-game
 
