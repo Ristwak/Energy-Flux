@@ -115,32 +115,44 @@ public class BallSliding : MonoBehaviour
         startPosition = pathPoints[0].position;
     }
 
-    // NEW: precompute which energy is dominant at each path point
     void PrecomputeEnergyMap()
     {
-        if (pathPoints == null || pathPoints.Length == 0)
-            return;
+        int count = pathPoints.Length;
+        energyAtPoint = new EnergyType[count];
 
-        energyAtPoint = new EnergyType[pathPoints.Length];
-
-        float heightRange = maxY - minY;
-        if (heightRange < 0.0001f)
+        for (int i = 0; i < count; i++)
         {
-            // flat path – arbitrarily mark all as kinetic
-            for (int i = 0; i < energyAtPoint.Length; i++)
+            // First and last point → no slope information → treat as potential
+            if (i == 0 || i == count - 1)
+            {
+                energyAtPoint[i] = EnergyType.Potential;
+                continue;
+            }
+
+            float prevY = pathPoints[i - 1].position.y;
+            float currY = pathPoints[i].position.y;
+            float nextY = pathPoints[i + 1].position.y;
+
+            // Local peak
+            if (currY > prevY && currY > nextY)
+            {
+                energyAtPoint[i] = EnergyType.Potential;
+            }
+            // Local valley
+            else if (currY < prevY && currY < nextY)
+            {
                 energyAtPoint[i] = EnergyType.Kinetic;
-            return;
-        }
-
-        for (int i = 0; i < pathPoints.Length; i++)
-        {
-            float y = pathPoints[i].position.y;
-            float normalizedHeight = (y - minY) / heightRange;  // 0..1
-
-            // Lower half → KE dominant, Upper half → PE dominant
-            energyAtPoint[i] = (normalizedHeight <= 0.5f)
-                ? EnergyType.Kinetic
-                : EnergyType.Potential;
+            }
+            // Upslope
+            else if (currY < nextY)
+            {
+                energyAtPoint[i] = EnergyType.Potential;
+            }
+            // Downslope
+            else
+            {
+                energyAtPoint[i] = EnergyType.Kinetic;
+            }
         }
     }
 
