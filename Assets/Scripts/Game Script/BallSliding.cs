@@ -1,56 +1,82 @@
 using UnityEngine;
+using UnityEngine.UI;
 
 public class BallSliding : MonoBehaviour
 {
     [Header("Movement / Path")]
-    public float minSlideSpeed = 1f;       // Minimum random speed
-    public float maxSlideSpeed = 4f;       // Maximum random speed
-    public Transform[] pathPoints;         // Points defining the path (in order, left → right)
+    public float minSlideSpeed = 1f;
+    public float maxSlideSpeed = 4f;
+    public Transform[] pathPoints;
 
-    private float slideSpeed;              // Actual current speed
-    private float[] segmentLengths;        // Length of each segment
-    private float[] pointDistances;        // Distance from start to each path point
-    private float totalPathLength;         // Sum of all segment lengths
-    private float distanceTravelled = 0f;  // How far we've moved along the path
+    private float slideSpeed;
+    private float[] segmentLengths;
+    private float[] pointDistances;
+    private float totalPathLength;
+    private float distanceTravelled = 0f;
     private float previousDistanceTravelled = 0f;
 
+    // NEW: use height range + precomputed energy map
+    private float minY;
+    private float maxY;
+
+    private enum EnergyType { Kinetic, Potential }
+    private EnergyType[] energyAtPoint;      // energy dominance at each path point
+    private int lastStopPathIndex = -1;      // which path point we stopped at last time
+
     [Header("Question UI")]
-    public GameObject questionPanel;       // The UI panel that shows the question
+    public GameObject questionPanel;
+    public Button kineticButton;
+    public Button potentialButton;
+    public GameObject gameOverPanel;
 
-    // Stop logic
-    private int[] stopPointIndices;        // 4 random indices of path points
-    private int currentStopIndexIdx = 0;   // Which stop index we are heading to (0..3)
-    private bool isSliding = true;         // Are we currently moving?
-    private bool isStopped = false;        // Are we currently at a question?
+    private int[] stopPointIndices;
+    private int currentStopIndexIdx = 0;
+    private bool isSliding = true;
+    private bool isStopped = false;
+    private bool isGameOver = false;
+    private Vector3 startPosition;
 
-    private Vector3 startPosition;         // Start position (first path point)
+    private bool isKineticCorrect = true;
 
     void Start()
     {
-        InitPath();             // Build path data (segment lengths, distances)
-        SetupRandomStops();     // Pick 4 random path points
-        SetRandomSpeed();       // Pick a random speed
+        InitPath();               // build path, compute minY/maxY
+        PrecomputeEnergyMap();    // NEW: decide KE/PE at every path point
+        SetupRandomStops();
 
-        // Place ball at start of path
+        slideSpeed = Random.Range(minSlideSpeed, maxSlideSpeed);
         transform.position = startPosition;
 
         if (questionPanel != null)
             questionPanel.SetActive(false);
+
+        if (gameOverPanel != null)
+            gameOverPanel.SetActive(false);
+
+        // buttons just check against isKineticCorrect
+        kineticButton.onClick.AddListener(() => AnswerQuestion(isKineticCorrect));
+        potentialButton.onClick.AddListener(() => AnswerQuestion(!isKineticCorrect));
     }
 
     void Update()
     {
-        if (!isSliding) return;
+        if (!isSliding || isGameOver) return;
 
         previousDistanceTravelled = distanceTravelled;
 
-        SlideAlongPath();       // Move along the path
-        CheckForStopTrigger();  // Check if we hit a question point
+        UpdateSpeedRandomly();
+        SlideAlongPath();
+        CheckForStopTrigger();
+        CheckForGameOver();
     }
 
-    /// <summary>
-    /// Precompute segment lengths, total path length, and cumulative distances.
-    /// </summary>
+    void UpdateSpeedRandomly()
+    {
+        float changeAmount = Random.Range(-0.2f, 0.2f);
+        slideSpeed += changeAmount;
+        slideSpeed = Mathf.Clamp(slideSpeed, minSlideSpeed, maxSlideSpeed);
+    }
+
     void InitPath()
     {
         if (pathPoints == null || pathPoints.Length < 2)
@@ -66,74 +92,85 @@ public class BallSliding : MonoBehaviour
         totalPathLength = 0f;
 
         pointDistances[0] = 0f;
+
+        // init min/max Y from first point
+        minY = maxY = pathPoints[0].position.y;
+
         for (int i = 0; i < count - 1; i++)
         {
             float segLen = Vector3.Distance(pathPoints[i].position, pathPoints[i + 1].position);
             segmentLengths[i] = segLen;
             totalPathLength += segLen;
             pointDistances[i + 1] = totalPathLength;
+
+            float y0 = pathPoints[i].position.y;
+            float y1 = pathPoints[i + 1].position.y;
+
+            if (y0 < minY) minY = y0;
+            if (y0 > maxY) maxY = y0;
+            if (y1 < minY) minY = y1;
+            if (y1 > maxY) maxY = y1;
         }
 
         startPosition = pathPoints[0].position;
-        distanceTravelled = 0f;
-        previousDistanceTravelled = 0f;
     }
 
-    /// <summary>
-    /// Randomly choose 4 unique path points (not including the first and last) as question stops.
-    /// </summary>
+    // NEW: precompute which energy is dominant at each path point
+    void PrecomputeEnergyMap()
+    {
+        if (pathPoints == null || pathPoints.Length == 0)
+            return;
+
+        energyAtPoint = new EnergyType[pathPoints.Length];
+
+        float heightRange = maxY - minY;
+        if (heightRange < 0.0001f)
+        {
+            // flat path – arbitrarily mark all as kinetic
+            for (int i = 0; i < energyAtPoint.Length; i++)
+                energyAtPoint[i] = EnergyType.Kinetic;
+            return;
+        }
+
+        for (int i = 0; i < pathPoints.Length; i++)
+        {
+            float y = pathPoints[i].position.y;
+            float normalizedHeight = (y - minY) / heightRange;  // 0..1
+
+            // Lower half → KE dominant, Upper half → PE dominant
+            energyAtPoint[i] = (normalizedHeight <= 0.5f)
+                ? EnergyType.Kinetic
+                : EnergyType.Potential;
+        }
+    }
+
     void SetupRandomStops()
     {
         int count = pathPoints.Length;
 
-        if (count < 6)
-        {
-            Debug.LogWarning("BallSliding: Not enough points to safely pick 4 internal stops. Using whatever is available.");
-        }
-
-        // We avoid index 0 (start) and last index (end), so range is [1, count-2]
-        // but code will still work even if count is small.
         System.Collections.Generic.HashSet<int> chosen = new System.Collections.Generic.HashSet<int>();
-
         int minIndex = 1;
-        int maxIndex = count - 2; // inclusive
+        int maxIndex = count - 2;
 
-        int stopsNeeded = Mathf.Min(4, Mathf.Max(0, maxIndex - minIndex + 1));
-
-        while (chosen.Count < stopsNeeded)
+        while (chosen.Count < 4 && chosen.Count < maxIndex - minIndex + 1)
         {
-            int idx = Random.Range(minIndex, maxIndex + 1);
-            chosen.Add(idx);
+            chosen.Add(Random.Range(minIndex, maxIndex + 1));
         }
 
-        // Copy to array and sort in ascending path order
-        stopPointIndices = new int[stopsNeeded];
+        stopPointIndices = new int[chosen.Count];
         chosen.CopyTo(stopPointIndices);
         System.Array.Sort(stopPointIndices);
 
         currentStopIndexIdx = 0;
     }
 
-    /// <summary>
-    /// Pick a random speed between minSlideSpeed and maxSlideSpeed.
-    /// </summary>
-    void SetRandomSpeed()
-    {
-        slideSpeed = Random.Range(minSlideSpeed, maxSlideSpeed);
-    }
-
-    /// <summary>
-    /// Move the ball along the predefined path.
-    /// </summary>
     void SlideAlongPath()
     {
         if (totalPathLength <= 0f) return;
 
-        // Advance along the path
         distanceTravelled += slideSpeed * Time.deltaTime;
         distanceTravelled = Mathf.Clamp(distanceTravelled, 0f, totalPathLength);
 
-        // Convert distanceTravelled to a position on the path
         float dist = distanceTravelled;
         int segmentIndex = 0;
 
@@ -145,7 +182,6 @@ public class BallSliding : MonoBehaviour
 
         if (segmentIndex >= segmentLengths.Length)
         {
-            // End of path
             transform.position = pathPoints[pathPoints.Length - 1].position;
             return;
         }
@@ -153,13 +189,10 @@ public class BallSliding : MonoBehaviour
         Transform p0 = pathPoints[segmentIndex];
         Transform p1 = pathPoints[segmentIndex + 1];
 
-        float t = segmentLengths[segmentIndex] > 0f ? dist / segmentLengths[segmentIndex] : 0f;
+        float t = segmentLengths[segmentIndex] > 0 ? dist / segmentLengths[segmentIndex] : 0f;
         transform.position = Vector3.Lerp(p0.position, p1.position, t);
     }
 
-    /// <summary>
-    /// Check if we have crossed the next stop point along the path.
-    /// </summary>
     void CheckForStopTrigger()
     {
         if (isStopped) return;
@@ -169,15 +202,16 @@ public class BallSliding : MonoBehaviour
         int pathPointIndex = stopPointIndices[currentStopIndexIdx];
         float stopDist = pointDistances[pathPointIndex];
 
-        // If we just crossed that distance this frame, stop.
         if (previousDistanceTravelled < stopDist && distanceTravelled >= stopDist)
         {
-            // Snap ball exactly to that point
             transform.position = pathPoints[pathPointIndex].position;
 
             isStopped = true;
             isSliding = false;
             currentStopIndexIdx++;
+
+            lastStopPathIndex = pathPointIndex;   // remember where we stopped
+            DetermineCorrectAnswer();             // look up precomputed energy
 
             ShowQuestionPanel();
         }
@@ -189,24 +223,32 @@ public class BallSliding : MonoBehaviour
             questionPanel.SetActive(true);
     }
 
-    /// <summary>
-    /// Called by your UI buttons with true/false.
-    /// </summary>
+    // NEW: simply read from precomputed energyAtPoint
+    void DetermineCorrectAnswer()
+    {
+        if (energyAtPoint == null ||
+            lastStopPathIndex < 0 ||
+            lastStopPathIndex >= energyAtPoint.Length)
+        {
+            isKineticCorrect = true; // fallback
+            return;
+        }
+
+        isKineticCorrect = (energyAtPoint[lastStopPathIndex] == EnergyType.Kinetic);
+    }
+
     public void AnswerQuestion(bool isCorrect)
     {
         if (isCorrect)
         {
-            // Correct answer, hide panel and continue sliding with a new random speed
             if (questionPanel != null)
                 questionPanel.SetActive(false);
 
             isStopped = false;
             isSliding = true;
-            SetRandomSpeed();        // New random speed for next segment
         }
         else
         {
-            // Incorrect answer, reset the run
             ResetBall();
         }
     }
@@ -215,15 +257,36 @@ public class BallSliding : MonoBehaviour
     {
         distanceTravelled = 0f;
         previousDistanceTravelled = 0f;
+
         transform.position = startPosition;
 
         isStopped = false;
         isSliding = true;
+        isGameOver = false;
 
         if (questionPanel != null)
             questionPanel.SetActive(false);
 
-        SetupRandomStops();   // New random 4 stop points
-        SetRandomSpeed();     // New random speed
+        SetupRandomStops();
+
+        slideSpeed = Random.Range(minSlideSpeed, maxSlideSpeed);
+    }
+
+    void CheckForGameOver()
+    {
+        if (isGameOver) return;
+
+        if (distanceTravelled >= totalPathLength)
+        {
+            isSliding = false;
+            isGameOver = true;
+            ShowGameOverPanel();
+        }
+    }
+
+    void ShowGameOverPanel()
+    {
+        if (gameOverPanel != null)
+            gameOverPanel.SetActive(true);
     }
 }
