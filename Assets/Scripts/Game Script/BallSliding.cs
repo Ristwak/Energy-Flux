@@ -29,9 +29,12 @@ public class BallSliding : MonoBehaviour
     public Button potentialButton;
     public GameObject gameOverPanel;
 
+    [Header("Controls")]
+    public Button startButton;   // <-- assign your Start button here (optional for UI)
+
     private int[] stopPointIndices;
     private int currentStopIndexIdx = 0;
-    private bool isSliding = true;
+    private bool isSliding = false;   // <-- START AS FALSE
     private bool isStopped = false;
     private bool isGameOver = false;
     private Vector3 startPosition;
@@ -41,7 +44,7 @@ public class BallSliding : MonoBehaviour
     void Start()
     {
         InitPath();               // build path, compute minY/maxY
-        PrecomputeEnergyMap();    // NEW: decide KE/PE at every path point
+        PrecomputeEnergyMap();    // decide KE/PE at every path point
         SetupRandomStops();
 
         slideSpeed = Random.Range(minSlideSpeed, maxSlideSpeed);
@@ -56,6 +59,15 @@ public class BallSliding : MonoBehaviour
         // buttons just check against isKineticCorrect
         kineticButton.onClick.AddListener(() => AnswerQuestion(isKineticCorrect));
         potentialButton.onClick.AddListener(() => AnswerQuestion(!isKineticCorrect));
+
+        // START BUTTON HOOK (optional, if using UI Button)
+        if (startButton != null)
+            startButton.onClick.AddListener(BeginSliding);
+
+        // IMPORTANT: do NOT auto-start sliding here
+        isSliding = false;
+        isStopped = false;
+        isGameOver = false;
     }
 
     void Update()
@@ -68,6 +80,26 @@ public class BallSliding : MonoBehaviour
         SlideAlongPath();
         CheckForStopTrigger();
         CheckForGameOver();
+    }
+
+    // Call this from your table Start button
+    public void BeginSliding()
+    {
+        if (isGameOver)
+        {
+            // If game was over, reset first
+            ResetBallInternal();
+        }
+
+        // After pressing Start, hide the Start button
+        if (startButton != null)
+            startButton.gameObject.SetActive(false);
+
+        // Only start sliding if not in a question stop
+        if (!isStopped)
+        {
+            isSliding = true;
+        }
     }
 
     void UpdateSpeedRandomly()
@@ -235,7 +267,7 @@ public class BallSliding : MonoBehaviour
             questionPanel.SetActive(true);
     }
 
-    // NEW: simply read from precomputed energyAtPoint
+    // simply read from precomputed energyAtPoint
     void DetermineCorrectAnswer()
     {
         if (energyAtPoint == null ||
@@ -257,15 +289,16 @@ public class BallSliding : MonoBehaviour
                 questionPanel.SetActive(false);
 
             isStopped = false;
-            isSliding = true;
+            isSliding = true;   // continue immediately after correct answer
         }
         else
         {
-            ResetBall();
+            // Wrong answer → reset and wait for Start button again
+            ResetBallInternal();
         }
     }
 
-    void ResetBall()
+    void ResetBallInternal()
     {
         distanceTravelled = 0f;
         previousDistanceTravelled = 0f;
@@ -273,15 +306,21 @@ public class BallSliding : MonoBehaviour
         transform.position = startPosition;
 
         isStopped = false;
-        isSliding = true;
+        isSliding = false;   // wait for Start button
         isGameOver = false;
 
         if (questionPanel != null)
             questionPanel.SetActive(false);
 
-        SetupRandomStops();
+        if (gameOverPanel != null)
+            gameOverPanel.SetActive(false);
 
+        SetupRandomStops();
         slideSpeed = Random.Range(minSlideSpeed, maxSlideSpeed);
+
+        // Show Start button again when game is restarted
+        if (startButton != null)
+            startButton.gameObject.SetActive(true);
     }
 
     void CheckForGameOver()
