@@ -7,6 +7,7 @@ public class BallSliding : MonoBehaviour
     public float minSlideSpeed = 1f;
     public float maxSlideSpeed = 4f;
     public Transform[] pathPoints;
+    public int stopPointsCount = 4;
 
     private float slideSpeed;
     private float[] segmentLengths;
@@ -196,7 +197,7 @@ public class BallSliding : MonoBehaviour
         int minIndex = 1;
         int maxIndex = count - 2;
 
-        while (chosen.Count < 4 && chosen.Count < maxIndex - minIndex + 1)
+        while (chosen.Count < stopPointsCount && chosen.Count < maxIndex - minIndex + 1)
         {
             chosen.Add(Random.Range(minIndex, maxIndex + 1));
         }
